@@ -1,0 +1,822 @@
+---
+title: "Modello Statistico per la Previsione del Peso Neonatale"
+author: "Eduardo De Filippis"
+output: html_document
+---
+<br>
+
+# 0 - Preparazione dell'ambiente di lavoro
+In questa sezione vengono richiamati i packages utili all'analisi da svolgere.<br>
+```{r, echo=TRUE, results='hide'}
+options(repos = c(CRAN = "https://cran.rstudio.com/")) #per creazione del documento con knit
+library(ggplot2)   
+library(carData)
+library(car)         #per diagnostica del modello
+library(moments)       #per calcolo di asimmetria e curtosi
+library(gridExtra)    #per personalizzazione della finestra output
+library(knitr)    #per formattare meglio alcune tabelle
+library(kableExtra)      #per formattare meglio alcune tabelle
+```
+
+<br>
+
+# 1 - Preparazione dei dati
+In questa sezione si procede dapprima all'importazione del dataset. Poi vengono manipolate alcune variabili qualitative per una codifica più appropriata, vengono quindi estratte le singole colonne dal dataset, nonchè mostrate le prime 10 osservazioni e la struttura generale dei dati. Infine vengono descritte le singole variabili esplicitando l'eventuale codifica.<br>
+```{r, echo=TRUE}
+neonati <- read.csv("neonati.csv", header = TRUE, stringsAsFactors = FALSE) #import dati
+```
+
+```{r, echo=TRUE}
+#codifica e conversione variabili
+neonati$Fumatrici <- factor(neonati$Fumatrici) #già codificata
+
+neonati$Tipo.parto[neonati$Tipo.parto == "Nat"] <- "0"
+neonati$Tipo.parto[neonati$Tipo.parto == "Ces"] <- "1"
+neonati$Tipo.parto <- factor(neonati$Tipo.parto)
+
+neonati$Ospedale[neonati$Ospedale == "osp1"] <- "1"
+neonati$Ospedale[neonati$Ospedale == "osp2"] <- "2"
+neonati$Ospedale[neonati$Ospedale == "osp3"] <- "3"
+neonati$Ospedale <- factor(neonati$Ospedale)
+
+neonati$Sesso[neonati$Sesso == "M"] <- "0"
+neonati$Sesso[neonati$Sesso == "F"] <- "1"
+neonati$Sesso <- factor(neonati$Sesso)
+
+attach(neonati) #estrazione colonne
+```
+
+```{r, echo=TRUE}
+#visualizzazione prime 10 righe
+kable(head(neonati,10), align = rep('c', 10)) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+```
+
+```{r, echo=TRUE}
+str(neonati) #struttura generale
+```
+
+Alcune variabili sono a livelli che partono da 1, invece che da 0, per impostazione di default quando sono state fatte conversioni in fattori (ciò non influenza l'analisi e le variabili binarie saranno comunque con codifica effettiva 1 e 0).<br>
+A dimostrazione della considerazione precedente viene mostrata la prima riga del dataset in cui, per esempio, secondo il comando str, il sesso è pari a 1 e invece effettivamente è valorizzato a 0.
+
+```{r, echo=TRUE}
+kable(neonati[1,], align = rep('c', 10)) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+```
+Il dataset è composto da 2500 osservazioni e 10 variabili, le quali sono:<br>
+- Anni.madre: Età in anni della madre. Variabile quantitativa continua<br>
+- N.gravidanze: Numedi di gravidanze avuto dalla madre. Variabile quantitativa discreta.<br>
+- Fumatrici: Qualifica di fumatrice o non fumatrice per la madre (0=non fumatrice, 1=fumatrice). Variabile qualitativa binaria.<br>
+- Gestazione: Numero di settimane di gestazione, quindi durata della gravidanza. Variabile quantitativa continua<br>
+- Peso: Peso alla nascita, in grammi, del neonato. Variabile quantitativa continua.<br>
+- Lunghezza: Lunghezza del neonato. Variabile quantitativa continua.<br>
+- Cranio: Diametro craniale. Variabile quantitativa continua.<br>
+- Tipo.parto: Tipo di parto (0=naturale, 1=cesareo). Variabile qualitativa binaria.<br>
+- Ospedale: Ospedale di nascita (ospedale1=1, ospedale2=2, ospedale3=3). Variabile qualitativa categoriale.<br>
+- Sesso: Sesso del neonato (maschio=0, femmina=1). Variabile qualitativa binaria.
+
+<br>
+
+# 2 - Analisi esplorativa e descrittiva
+In questa sezione viene proposta un'analisi esplorativa sui dati: statistiche descrittive, distribuzioni e boxplots.
+
+<br>
+
+## 2.1 - Statistiche descrittive generali
+<br>
+```{r, echo=TRUE}
+options(knitr.kable.NA = "") #celle vuote
+kable(summary(neonati), align = rep('c', 10)) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+```
+
+Si nota un problema: Anni.madre ha come valore minimo 0. Ciò è molto strano quindi i valori della colonna vengono ordinati per individuare eventuali errori e vengono stampati i primi 20.
+
+```{r, echo=TRUE}
+tmp<-sort(neonati$Anni.madre)
+print(head(tmp, 20))
+```
+
+Sono presenti due valori, impossibili da verificarsi, che sono pari a 0 e 1. Vengono eliminati dal vettore per calcolare la media delle restanti valorizzazioni, poi tale media viene imputata alle osservazioni del dataset con Anni.madre=0 e 1.
+
+```{r, echo=TRUE}
+tmp<-tmp[3:length(tmp)]
+mean(tmp)
+```
+
+```{r, echo=TRUE}
+neonati[neonati$Anni.madre %in% c(0, 1), ]
+
+#imputazione con media nel dataset
+neonati$Anni.madre[1380]=28.18615
+neonati$Anni.madre[1152]=28.18615
+```
+
+Viene riproposto un summary corretto del dataset.
+
+```{r, echo=TRUE}
+kable(summary(neonati), align = rep('c', 10)) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+```
+
+Si potrebbero discutere tanti aspetti delle statistiche descrittive. Ciò che però si evidenzia in questa sede è che le variabili quantitative presentano tutte delle medie che sono prossime alla mediana, quindi probabilmente sono distribuzioni simmetriche. Ciononostante sarà presentata un'analisi grafica e degli indici di forma per valutare ciò.<br>
+Indicatori di variabilità sono omessi poichè saranno deducibili dai modelli presentati in seguito.<br>
+Di seguito vengono presentate le distribuzioni di frequenza per le variabili qualitative.
+
+```{r, echo=TRUE}
+freq_ass <- table(Fumatrici)
+freq_rel <- table(Fumatrici)/length(Fumatrici) # Tabella distribuzione frequenze relative
+distr_freq_Fumatrici<-data.frame(cbind(freq_ass,freq_rel)) 
+distr_freq_Fumatrici
+```
+
+Se si considera la caratteristica della madre "fumatrice o non fumatrice" il dataset è totalmente sbilanciato, infatti oltre il 95% dei neonati ha una madre che non è fumatrice.
+
+```{r, echo=TRUE}
+freq_ass <- table(Tipo.parto)
+freq_rel <- table(Tipo.parto)/length(Tipo.parto)
+distr_freq_Tipo.parto<-data.frame(cbind(freq_ass,freq_rel)) 
+distr_freq_Tipo.parto
+```
+
+Se si considera il tipo di parto il dataset risulta, anche in questo caso, altamente sbilanciato, infatti meno del 30% dei neonati è nato tramite parto cesareo.
+
+```{r, echo=TRUE}
+freq_ass <- table(Ospedale)
+freq_rel <- table(Ospedale)/length(Ospedale)
+distr_freq_Ospedale<-data.frame(cbind(freq_ass,freq_rel)) 
+distr_freq_Ospedale
+```
+
+Se si considera l'ospedale di nascita a cui è associata la singola osservazione, il dataset risulta più o meno bilaciato. Infatti circa il 33% dei neonati è nato in ognuno degli ospedali considerati.
+
+```{r, echo=TRUE}
+freq_ass <- table(Sesso)
+freq_rel <- table(Sesso)/length(Sesso)
+distr_freq_Sesso<-data.frame(cbind(freq_ass,freq_rel)) 
+distr_freq_Sesso
+```
+
+Se si considera il sesso del neonato, il dataset è pressocchè bilanciato. Infatti quasi la metà è maschio e poco più della metà è femmina.
+
+```{r, echo=TRUE}
+# La variabile numero gravidanze (quantitativa discreta) presenta poche modalità quindi per fini di esplorazione si stampano le frequenze
+freq_ass <- table(N.gravidanze)
+freq_rel <- table(N.gravidanze)/length(N.gravidanze)
+distr_freq_ng<-data.frame(cbind(freq_ass,freq_rel)) 
+kable(distr_freq_ng, align = rep('c', 3)) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+```
+
+Oltre l'80% dei neonati ha una madre che ha avuto al più 3 gravidanze.
+
+<br>
+
+## 2.2 - Distribuzioni empiriche, stime del kernel e indici di asimmetria e curtosi
+```{r, echo=TRUE}
+# Distribuzione Anni della madre
+g1<-ggplot(neonati, aes(x = Anni.madre)) +
+  geom_histogram(aes(y = after_stat(density)), binwidth = 1, fill = "steelblue", color = "black") +
+  geom_density(color = "red", size = 0.7) +
+  labs(x = "Anni.madre", y = "Frequenza")
+
+# Distribuzione del Numero di gravidanze associato alla madre
+g2<-ggplot(neonati, aes(x = N.gravidanze)) +
+  geom_histogram(aes(y = after_stat(count / sum(count))), binwidth = 0.3, fill = "steelblue", color = "black") +
+  labs(x = "N.gravidanzee", y = "Frequenza")
+
+# Distribuzione delle settimane di gestazione
+g3<-ggplot(neonati, aes(x = Gestazione)) +
+  geom_histogram(aes(y = after_stat(count / sum(count))), binwidth = 0.3, fill = "steelblue", color = "black") +
+  labs(x = "Gestazione", y = "Frequenza")
+
+#Distribuzione del Peso del neonato (variabile risposta)
+g4<-ggplot(neonati, aes(x = Peso)) +
+  geom_histogram(aes(y = after_stat(density)), binwidth = 70, fill = "steelblue", color = "black") +
+  geom_density(color = "red", size = 0.7) +
+  labs(x = "Peso", y = "Frequenza")
+
+#Distribuzione della lunghezza del neonato
+g5<-ggplot(neonati, aes(x = Lunghezza)) +
+  geom_histogram(aes(y = after_stat(density)), binwidth = 10, fill = "steelblue", color = "black") +
+  geom_density(color = "red", size = 0.7) +
+  labs(x = "Lunghezza", y = "Frequenza")
+
+# Distribuzione della grandezza del cranio del neonato
+g6<-ggplot(neonati, aes(x = Cranio)) +
+  geom_histogram(aes(y = after_stat(density)), binwidth = 5, fill = "steelblue", color = "black") +
+  geom_density(color = "red", size = 0.7) +
+  labs(x = "Cranio", y = "Frequenza")
+
+grid.arrange(g1, g2, g3, g4, g5, g6, ncol = 3)
+```
+
+La distribuzione di Anni.madre sembra approssimativamente una normale.<br>
+La distribuzione di N.gravidanze segue un andamento tipico della distribuzione di Poisson oppure della distribuzione Zeta (o legge di Zipf).<br>
+La distribuzione di Gestazione è asimmetrica negativa. Segue un andamento tipico della distribuzione binomiale negativa.<br>
+La distribuzione del peso sembra essere leggermente asimmetrica negativa e l'andamento è campanulare.<br>
+La distribuzione di Lunghezza è asimmetrica negativa e l'andamento è campanulare.<br>
+La distribuzione della dimensione del cranio è asimmetrica negativa e l'andamento è campanulare anche in questo caso.
+
+```{r, echo=TRUE}
+skewness_values <- c(
+  skewness(Anni.madre),
+  skewness(N.gravidanze),
+  NA,# non ha senso calcolare questi indicatori su variabili come fumatrici, tipo parto, ospedale e sesso
+  skewness(Gestazione),
+  skewness(Peso),
+  skewness(Lunghezza),
+  skewness(Cranio),
+  NA,
+  NA,
+  NA
+)
+
+kurtosis_values <- c(
+  kurtosis(Anni.madre)-3,
+  kurtosis(N.gravidanze)-3,
+  NA,
+  kurtosis(Gestazione)-3,
+  kurtosis(Peso)-3,
+  kurtosis(Lunghezza)-3,
+  kurtosis(Cranio)-3,
+  NA,
+  NA,
+  NA
+)
+
+# Creazione del dataframe
+df <- data.frame(
+  Variabile = c("Anni.madre","N.gravidanze", "Fumatrici", "Gestazione", "Peso", "Lunghezza", "Cranio", "Tipo.parto", "Ospedale", "Sesso"),
+  Asimmetria = skewness_values,
+  Curtosi = kurtosis_values
+)
+
+kable(df, align = rep('c', 3)) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+```
+
+Quanto ipotizzato dall'analisi grafica si rivela corretto. L'unica eccezione è nel caso del numero di gravidanze, che è un caso estremo di distribuzione dove non esiste una moda.<br>
+Per quanto riguarda la curtosi, tutte le distribuzioni raggiungono dei massimi più elevati di quello di una normale (leptocurtosi). Anni della madre si rivela leggermente leptocurtica (e altrettanto leggermente asimmetrica positiva).
+
+<br>
+
+## 2.3 - Boxplots
+```{r, echo=TRUE}
+p1 <- ggplot(neonati, aes(y = Anni.madre)) +
+  geom_boxplot(fill = "lightblue", color = "darkblue") +
+  labs(title = "Anni.madre", y = "Anni") +
+  theme_minimal()
+
+p2 <- ggplot(neonati, aes(y = N.gravidanze)) +
+  geom_boxplot(fill = "lightblue", color = "darkblue") +
+  labs(title = "N.gravidanze", y = "Numero") +
+  theme_minimal()
+
+p3 <- ggplot(neonati, aes(y = Gestazione)) +
+  geom_boxplot(fill = "lightblue", color = "darkblue") +
+  labs(title = "Gestazione", y = "Settimane") +
+  theme_minimal()
+
+p4 <- ggplot(neonati, aes(y = Peso)) +
+  geom_boxplot(fill = "lightblue", color = "darkblue") +
+  labs(title = "Peso", y = "Peso (grammi)") +
+  theme_minimal()
+
+p5 <- ggplot(neonati, aes(y = Lunghezza)) +
+  geom_boxplot(fill = "lightblue", color = "darkblue") +
+  labs(title = "Lunghezza", y = "Lunghezza (cm)") +
+  theme_minimal()
+
+p6 <- ggplot(neonati, aes(y = Cranio)) +
+  geom_boxplot(fill = "lightblue", color = "darkblue") +
+  labs(title = "Cranio", y = "Circonferenza (cm)") +
+  theme_minimal()
+
+#boxplots relativi a Fumatrici, Tipo.parto, Ospedale e Sesso sono omessi poichè variabili binarie o con tre modalità (Ospedale)
+
+grid.arrange(p1, p2, p3, p4, p5, p6, ncol = 3)
+```
+
+Dei diversi boxplots, l'elemento più interessante è che sono presenti diversi valori "anomali" e che si discostano dalla maggior parte degli altri valori, talvolta verso l'alto e talvolta verso il basso. L'eventuale influenza sarà discussa in seguito.<br>
+
+<br>
+
+## 2.4 - Boxplot del Peso in base ad alcune features
+```{r, echo=TRUE}
+h1<-ggplot(neonati, aes(x = Fumatrici, y = Peso, fill = Fumatrici)) +
+  geom_boxplot() +
+  labs(title = "Peso|Fumatrice", x = "fumatrici", y = "Peso (grammi)")
+
+h2<-ggplot(neonati, aes(x = Tipo.parto, y = Peso, fill = Tipo.parto)) +
+  geom_boxplot() +
+  labs(title = "Peso|Tipo.parto", x = "tipo parto", y = "Peso (grammi)")
+
+h3<-ggplot(neonati, aes(x = Ospedale, y = Peso, fill = Ospedale)) +
+  geom_boxplot() +
+  labs(title = "Peso|Ospedale", x = "ospedale", y = "Peso (grammi)")
+
+h4<-ggplot(neonati, aes(x = Sesso, y = Peso, fill = Sesso)) +
+  geom_boxplot() +
+  labs(title = "Peso|Sesso", x = "Sesso", y = "Peso (grammi)")
+
+grid.arrange(h1, h2, h3, h4, ncol = 2)
+```
+
+Per quanto riguarda i boxplots di Peso in base a Fumatrici, Tipo.parto, Ospedale e Sesso, l'elemento più interessante è che le differenze in media tra i gruppi non sembrano particolarmente grandi (ciò comunque andrà valutato con le variabili dummy e categoriali in fase di stima e tramite tests). Inoltre sono presenti molti valori anomali.<br>
+
+<br>
+
+# 3 - Verifica delle ipotesi
+In questa sezione vengono testate alcune ipotesi.
+
+<br>
+
+## 3.1 - Ipotesi: In alcuni ospedali si fanno più parti cesarei
+
+```{r, echo=TRUE}
+# Tabella di contingenza per Ospedale e Tipo di Parto
+tab_parto <- table(Ospedale, Tipo.parto)
+print(tab_parto)
+# Test chi-quadro per verificare l'associazione tra variabili categoriali (in distribuzioni doppie)
+test_parto <- chisq.test(tab_parto)
+print(test_parto)
+```
+
+Il test del chi quadrato confronta queste frequenze osservate con le frequenze attese, che rappresentano i valori che ci si aspetterebbe se non ci fosse alcuna associazione tra le due variabili.<br>
+In questo caso il test è il seguente<br>
+H0: Assenza di associazione VS H1: Associazione<br>
+Il p-value è molto elevato quindi non si rifiuta l'ipotesi nulla e non ci sono evidenze statistiche per concludere che esista un'associazione tra tipo di parto e ospedale.
+
+<br>
+
+## 3.2 - Ipotesi: La media del peso e della lunghezza sono significativamente uguali a quelle della popolazione
+
+```{r, echo=TRUE}
+# Definiamo dei valori ipotetici di riferimento:
+pop_mean_peso <- 3250      # Secondo la letteratura, il peso della popolazione di riferimento (neonati) si aggira intorno a 3284 grammi
+pop_mean_lunghezza <- 49.5   # Secondo la letteratura, la lunghezza della popolazione di riferimento (neonati) si aggira intorno a 49.5 centimetri
+#fonte: https://www.who.int/publications/i/item/924154693X
+
+# Test t a campione singolo per il Peso
+t_test_peso <- t.test(Peso, mu = pop_mean_peso)
+print(t_test_peso)
+
+# Supponendo che la lunghezza cranio
+t_test_lunghezza <- t.test(Lunghezza, mu = pop_mean_lunghezza)
+print(t_test_lunghezza)
+
+# Test aggiuntivo peso-----1.1
+t_test_lunghezza <- t.test(Peso, mu = pop_mean_peso, alternative = "greater")
+print(t_test_lunghezza)
+
+# Test aggiuntivo peso------1.2
+t_test_lunghezza <- t.test(Peso, mu = pop_mean_peso, alternative = "less")
+print(t_test_lunghezza)
+
+# Test aggiuntivo lunghezza cranio---------2.1
+t_test_lunghezza <- t.test(Lunghezza, mu = pop_mean_lunghezza, alternative = "greater")
+print(t_test_lunghezza)
+
+# Test aggiuntivo lunghezza cranio-------2.2
+t_test_lunghezza <- t.test(Lunghezza, mu = pop_mean_lunghezza, alternative = "less")
+print(t_test_lunghezza)
+
+```
+
+I test svolti sono i seguenti:<br>
+1) H0: Peso medio (nel campione) = 3250 VS H1: Peso medio (nel campione) ≠ 3250 <br>
+2) H0: Lunghezza media del neonato (nel campione) = 49.5 VS H1: Lunghezza media del neonato (nel campione) ≠ 49.5 <br>
+
+1.1) H0: Peso medio del neonato (nel campione) = 3250 VS H1: Peso medio del neonato (nel campione) > 3250 <br>
+1.2) H0: Peso medio del neonato (nel campione) = 3250 VS H1: Peso medio del neonato (nel campione) < 3250<br>
+
+2.1) H0: Lunghezza media del neonato (nel campione) = 49.5 VS H1: Lunghezza media del neonato (nel campione) > 49.5<br>
+2.2) H0: Lunghezza media del neonato (nel campione) = 49.5 VS H1: Lunghezza media del neonato (nel campione) < 49.5 <br>
+<br>
+Nel primo test si rifiuta H0, quindi il vero peso del campione è statisticamente diverso da 3250 grammi.<br>
+Nel secondo test si rifiuta H0, quindi la vera lunghezza è statisticamente diversa da 49.5 centimetri.<br>
+
+I test 1.1 e 1.2 mirano a vedere il verso della disuguaglianza del primo test. Più precisamente viene mostrato che il peso medio del neonato, nel campione considerato è statisticamente maggiore di 3250 grammi (infatti nel test 1.1 si rifiuta H0 ma nel test 1.2 no).<br>
+I test 2.1 e 2.2 mirano a vedere il verso della disuguaglianza del secondo test. Più precisamente viene mostrato che la lunghezza media del neonato, nel campione considerato, è statisticamente maggiore di 49.5 centrimetri (infatti nel test 2.1 si rifiuta H0 ma nel test 2.2 no).<br>
+
+<br>
+
+## 3.3 - Ipotesi: Le misure antropometriche sono significativamente diverse tra i due sessi
+
+```{r, echo=TRUE}
+# Confronto per il Peso
+t_test_sex_peso <- t.test(Peso ~ Sesso, data = neonati)
+print(t_test_sex_peso)
+
+# Confronto per la Lunghezza
+t_test_sex_lunghezza <- t.test(Lunghezza ~ Sesso, data = neonati)
+print(t_test_sex_lunghezza)
+
+# Confronto per Cranio
+t_test_sex_cranio <- t.test(Cranio ~ Sesso, data = neonati)
+print(t_test_sex_cranio)
+```
+
+I test svolti sono i seguenti:<br>
+1) H0: Differenza nel peso medio dei neonati maschi e femmine = 0 VS H1: Peso medio dei neonati maschi è diverso da quello delle femmine (quindi differenza ≠ 0)<br>
+2) H0: Differenza nella lunghezza media dei neonati maschi e femmine = 0 VS H1: Lunghezza media dei neonati maschi è diversa da quella delle femmine (quindi differenza ≠ 0)<br>
+3) H0: Differenza nella grandezza media del cranio dei neonati maschi e femmine = 0 VS H1: Grandezza media del cranio dei neonati maschi è diversa da quella delle femmine (quindi differenza ≠ 0)<br>
+<br>
+In tutti i test si rifiuta l'ipotesi nulla H0 quindi c'è una differenza statisticamente significativa nelle misure antropometriche (peso, grandezza cranio e lunghezza del bambino).
+
+<br>
+
+# 4 - Modelli
+In questa sezione vengono mostrati gli scatterplot per dare una idea orientativa sul verso e intensità della potenziale relazione tra le variabili e Peso, inoltre viene mostrato il grado di correlazione lineare tra le variabili. In seguito vengono costruiti e valutati alcuni modelli.
+
+<br>
+
+## 4.1 - Grafici (scatterplot) preliminari alla costruzione modelli regressivi
+
+```{r, echo=TRUE}
+w1 <- ggplot(neonati, aes(x = Anni.madre, y = Peso)) +
+  geom_point(color = "blue") +
+  labs(title = "Scatterplot Anni.madre-Peso", x = "Anni.madre", y = "Peso")
+
+w2 <- ggplot(neonati, aes(x = N.gravidanze, y = Peso)) +
+  geom_point(color = "blue") +
+  labs(title = "Scatterplot N.gravidanze-Peso", x = "N.gravidanze", y = "Peso")
+
+w3 <- ggplot(neonati, aes(x = Gestazione, y = Peso)) +
+  geom_point(color = "blue") +
+  labs(title = "Scatterplot Gestazione-Peso", x = "Settimane di gestazione", y = "Peso")
+
+w4 <- ggplot(neonati, aes(x = Lunghezza, y = Peso)) +
+  geom_point(color = "blue") +
+  labs(title = "Scatterplot Lunghezza-Peso", x = "Lunghezza", y = "Peso")
+
+w5 <- ggplot(neonati, aes(x = Cranio, y = Peso)) +
+  geom_point(color = "blue") +
+  labs(title = "Scatterplot Cranio-Peso", x = "Grandezza cranio", y = "Peso")
+
+# Disposizione dei grafici in una griglia
+grid.arrange(w1, w2, w3, w4, w5, ncol = 3)
+```
+
+Le variabili relative alla grandezza cranio, lunghezza neonato e settimane gestazione hanno una relazione positiva con il peso (l'intensità e l'eventuale non linearità sono da valutare in seguito).<br>
+Per quanto riguarda il numero gravidanze e gli anni della madre, sembrano avere una relazione ambigua con il peso.
+
+<br>
+
+## 4.2 - Correlazioni
+
+```{r, echo=TRUE}
+# grafico matrice di correlazione
+panel.cor <- function(x, y, digits = 2, prefix = "", cex.cor, ...)
+{
+  usr <- par("usr"); on.exit(par(usr))
+  par(usr = c(0, 1, 0, 1))
+  r <- (cor(x, y))
+  txt <- format(c(r, 1), digits = digits)[1]
+  txt <- paste0(prefix, txt)
+  if(missing(cex.cor)) cex.cor <- 0.8/strwidth(txt)
+  text(0.5, 0.5, txt, cex = 1.5)
+}
+# sotto le correlazioni, sopra i grafici associati
+
+suppressWarnings({ # soppressione "Warning: argument 1 does not name a graphical parameter"
+  pairs(neonati, lower.panel = panel.cor, upper.panel = panel.smooth)
+})
+```
+
+Gli unici casi di correlazione elevata, a parte quella di alcune variabili con l'output, sono: lunghezza-gestazione e cranio-lunghezza.
+
+<br>
+
+# 4.3 Modelli regressivi
+Dapprima è bene evidenziare che i tipo di parto e ospedale non verranno considerate in alcun modello poichè non utili a spiegare e prevedere il peso di un neonato.<br>
+Si tenga conto che per i dati a disposizione sorgono certamente almeno due problemi:<br>
+- Qualsiasi tipo di stima e qualsiasi modello si usi, genereranno stime più o meno distorte a causa di variabili omesse (esempio caratteristiche del padre o altre caratteristiche rilevanti).
+- È molto probabile che si riscontrino problemi di doppia causalità (lunghezza, cranio e sesso incidono su peso ma vale anche il contrario, oppure il tipo di peso incide sul peso ma anche viceversa). Dunque la stima sarà sicuramente distorta. Una soluzione appropriata è quella di adottare una modellistica basata sulle variabili strumentali e approfondire la questione della esogenità ed endogenità. La modellistica presentata, regressione lineare, NON è appropriata.
+<br>
+```{r, echo=TRUE}
+m0.1 <- lm(Peso ~ Anni.madre)
+summary(m0.1)
+```
+
+```{r, echo=TRUE}
+m0.2 <- lm(Peso ~ I(Anni.madre))
+summary(m0.2)
+```
+
+```{r, echo=TRUE}
+m0.3<- lm(Peso ~ N.gravidanze)
+summary(m0.3)
+```
+
+```{r, echo=TRUE}
+m0.4 <- lm(Peso ~ Fumatrici)
+summary(m0.4)
+```
+
+```{r, echo=TRUE}
+m0.5 <- lm(Peso ~ Gestazione)
+summary(m0.5)
+```
+
+```{r, echo=TRUE}
+m0.6 <- lm(Peso ~ I(Gestazione))
+summary(m0.6)
+```
+
+```{r, echo=TRUE}
+m0.7 <- lm(Peso ~ Lunghezza)
+summary(m0.7)
+```
+
+```{r, echo=TRUE}
+m0.8 <- lm(Peso ~ I(Lunghezza))
+summary(m0.8)
+```
+
+```{r, echo=TRUE}
+m0.9 <- lm(Peso ~ Cranio)
+summary(m0.9)
+```
+
+```{r, echo=TRUE}
+m0.10 <- lm(Peso ~ I(Cranio))
+summary(m0.10)
+```
+
+```{r, echo=TRUE}
+m0.11 <- lm(Peso ~ Sesso)
+summary(m0.11)
+```
+
+I modelli m0.1-m0.11 mostrano che:<br>
+- Anni.madre, N.gravidanze e Fumatrici, non sembrano avere un impatto significativo sul peso di un neonato.<br>
+- Gestazione, Lunghezza, Cranio e Sesso sembrano avere un effetto significativo sul peso.<br>
+- I termini non lineari delle variabili che sembrano significative non apportano alcun miglioramento a livello di modello (nè in termini di r2adj, ne in termini di residui), quindi la modellazione verrà semplificata con l'utilizzo di termini lineari.
+
+```{r, echo=TRUE}
+m1 <- lm(Peso ~ Anni.madre+N.gravidanze+Fumatrici+Gestazione+Lunghezza+Cranio+Sesso)
+summary(m1)
+```
+
+Nel modello pieno (m1) ci sono variabili non significative quindi si procede alla rimozione prima di Anni.madre (m2) e poi della variabile dummy Fumatrici (m3).
+
+```{r, echo=TRUE}
+m2<- lm(Peso ~ N.gravidanze+Fumatrici+Gestazione+Lunghezza+Cranio+Sesso)
+summary(m2)
+```
+
+```{r, echo=TRUE}
+m3 <- lm(Peso ~ N.gravidanze+Gestazione+Lunghezza+Cranio+Sesso)
+summary(m3)
+```
+- (Intercept): Il valore di -6603.1518 rappresenta l’intercetta del modello, ovvero il peso previsto del neonato quando tutte le altre variabili sono zero (inoltre si intende che anche Sesso=0 quindi la stima è riferita ai neonati maschi). Tuttavia, poiché valori nulli per le variabili come lunghezza o cranio non sono realistici, l’intercetta ha un significato limitato nel contesto pratico.<br>
+- N.gravidanze: Il coefficiente di 12.4750 indica che, a parità delle altre variabili, ogni gravidanza è associata a un aumento medio di circa 12.48 grammi nel peso del neonato.<br>
+- Gestazione: Con un coefficiente di 32.3321, ogni settimana aggiuntiva di gestazione è associata a un aumento medio di circa 32.33 grammi nel peso del neonato.<br>
+- Lunghezza: Il coefficiente di 10.2486 suggerisce che ogni centimetro in più nella lunghezza del neonato è associato a un aumento medio di circa 10.25 grammi nel peso.<br>
+- Cranio: Con un coefficiente di 10.5402, ogni centimetro in più nella circonferenza cranica è associato a un aumento medio di circa 10.54 grammi nel peso del neonato. <br>
+- Sesso1: Il coefficiente di -77.9927 indica che, a parità delle altre variabili, i neonati di sesso femminile (codificati come 1) pesano in media circa 78 grammi in meno rispetto ai maschi. Quindi è statisticamente significativa la differenza di peso alla nascita tra i sessi. Questo risultato era osservabile già nel confronto dei boxplot del peso rispetto a maschi e femmine.<br>
+<br>
+In sintesi, il modello evidenzia che la durata della gestazione, la lunghezza e la circonferenza cranica del neonato sono fortemente associate al peso alla nascita. Inoltre, il numero di gravidanze precedenti e il sesso del neonato influenzano significativamente il peso, con le femmine che tendono a pesare meno dei maschi (in questo campione).<br>
+
+```{r, echo=TRUE}
+anova(m2,m3)
+```
+
+Il test ANOVA, sopra, vuole verificare se la rimozione della variabile dummy Fumatrici è una scelta opportuna poichè Fumatrici=1 non è significativa ma l'intercetta del modello si (Fumatrici=0). Il test rivela che l'aggiunta della variabile Fumatrice non apporta miglioramenti significativi al modello.
+
+```{r, echo=TRUE}
+vif(m3)
+```
+
+Il calcolo del vif non mostra possibili problemi di collinearità.<br>
+<br>
+Il modello m4, sfrutta le variabili del modello m3 tenendo anche conto di possibili interazioni tra le variabili dummy Sesso e fumatrici (altre interazioni con le altre variabili generano altissima multicollinearità). Nella proposta m4 la dummy Fumatrici e l'interazione sono non significative, in m5 Fumatrici resta non significativa (p-value>0.05) e inoltre genera la non significatività di N.gravidanze.
+
+```{r, echo=TRUE}
+#interazioni
+m4 <- lm(Peso ~ N.gravidanze+Gestazione+Lunghezza+Cranio+Sesso+Sesso*Fumatrici)
+summary(m4)
+vif(m4)
+```
+
+```{r, echo=TRUE}
+m5 <- lm(Peso ~ Gestazione+Cranio+N.gravidanze+Sesso*Fumatrici)
+summary(m5)
+vif(m5)
+```
+
+In conclusione, basandoci sulla significatività, errore standard dei residui e r2adj, m3 è il miglior modello a cui si può giungere secondo la metodologia seguita.
+
+```{r, echo=TRUE}
+kable(cbind(AIC(m1,m2,m3,m4,m5),BIC(m1,m2,m3,m4,m5)), align = rep('c', 5)) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+```
+
+La considerazione fatta sopra resta valida anche seguendo i criteri AIC e BIC (si ricorda che m4 e m5 presentano problemi di collinearità e distorsioni che fanno ritornare al modello m3).<br>
+Per completezza vengono riportati di seguito due indicatori già discussi sopra.
+
+```{r, echo=TRUE}
+r_squared <- summary(m1)$adj.r.squared
+rmse <- sqrt(mean(m1$residuals^2))
+cbind(paste("m1:::","R² =", r_squared),paste("RMSE =", rmse))
+
+r_squared <- summary(m2)$adj.r.squared
+rmse <- sqrt(mean(m2$residuals^2))
+cbind(paste("m2:::","R² =", r_squared),paste("RMSE =", rmse))
+
+r_squared <- summary(m3)$adj.r.squared
+rmse <- sqrt(mean(m3$residuals^2))
+cbind(paste("m3:::","R² =", r_squared),paste("RMSE =", rmse))
+
+r_squared <- summary(m4)$adj.r.squared
+rmse <- sqrt(mean(m4$residuals^2))
+cbind(paste("m4:::","R² =", r_squared),paste("RMSE =", rmse))
+
+r_squared <- summary(m5)$adj.r.squared
+rmse <- sqrt(mean(m5$residuals^2))
+cbind(paste("m5:::","R² =", r_squared),paste("RMSE =", rmse))
+#il migliore è m3 secondo r2adj, rmse aic, bic e vif
+```
+
+<br>
+
+# 5 - Analisi dei residui e diagnostica del modello m3
+In questa sezione viene mostrata una valutazione più approfondita del modello m3 che risulta il migliore in un contesto di regressione lineare multipla.
+
+```{r, echo=TRUE}
+# Creazione dell'istogramma con 80 barre e scala di densità
+hist(residuals(m3), breaks = 80, freq = FALSE, 
+     main = "Istogramma dei residui con stima kernel",
+     xlab = "Residui", col = "lightgray", border = "white")
+
+# Sovrapposizione della curva di densità kernel
+lines(density(residuals(m3)), col = "red", lwd = 1)
+```
+
+La stima della funzione di densità dei residui sembra avere la forma di una normale, però la coda destra è notevolmente più allungata
+
+```{r, echo=TRUE}
+# Plot diagnostici
+par(mfrow=c(2,2))
+plot(m3)
+par(mfrow=c(1,1)) # reset finestra
+```
+
+- I residui rispetto ai valori adattati dal modello (residuals vs fitted) sembrano essere sparsi attorno a zero, però si nota anche un possibile trend a "U" (quindi una possibile eteroschedasticità latente).<br>
+- Il valori che rappresentano la radice quadrata dei valori assoluti dei residui standardizzati rispetto ai valori adattati (scale-location) sembrano essere addensati attorno ad un particolare punto ed inoltre sembra esserci un pattern con un trend a "U" oppure sinusoidale (dunque possibile eteroschedasticità).<br>
+- La distribuzione dei residui sembra essere in linea con la distribuzione teorica della normale (Q-Q residuals) e solamente i valori più estremi sembrano discostarsi dalle stime teoriche.<br>
+- Il grafico residuals vs leverage mostra i residui standardizzati rispetto alla leva per ciascun punto e l'unico valore potenzialmente influente nel modello è l'osservazione 1551.<br>
+  
+```{r, echo=TRUE}
+shapiro.test(m3$residuals)
+lmtest::bptest(m3)
+lmtest::dwtest(m3)
+```
+
+Nei primi 2 test si rifiuta h0 quindi la distribuzione dei residui non è normale e non ha varianza costante (quindi c'è eteroschedasticità, come già ipotizzato). Si conclude che questo modello è inappropriato e distrorto! Probabilmente sarebbe un buon modello se si inserisse la robustezza all'eteroschedasticità (che genera stime più attendibili sia nel caso sia di eteroschedasticità che di omoschedasticità).
+
+```{r, echo=TRUE}                                                                                                                               
+# leverage
+lev<-hatvalues(m3)
+plot(lev)
+p<-sum(lev)
+n<-length(lev)
+soglia=2*p/n
+abline(h=soglia,col=2)
+```
+
+```{r, echo=TRUE}
+lev[lev>soglia]
+```
+
+```{r, echo=TRUE}
+lev[lev>0.04]
+```
+
+Le osservazioni con valori di leva superiori alla soglia 2 * p / n sono considerate potenzialmente influenti nello spazio dei regressori. Questi punti hanno combinazioni di valori delle variabili indipendenti che si discostano significativamente dalla media delle altre osservazioni, conferendo loro un peso maggiore nella determinazione dei coefficienti del modello. Sembrano essere molti.<br>
+L'osservazione associata al valore di leva più alto (0.04876957) è quella con indice 1551 (osservazione che sembrava problematica già nell'analisi dei residui).
+
+```{r, echo=TRUE}
+# outliers
+plot(rstudent(m3))
+abline(h=c(-2,2))
+```
+
+Sono presenti diversi valori influenti, ovvero outliers, nello spazio della variabile di output. Di seguito un test per valutarne l'effettiva influenza.
+
+```{r, echo=TRUE}
+car::outlierTest(m3)
+```
+Il p-value non aggiustato (unadjusted p-value) rappresenta la probabilità associata al residuo studentizzato ed indica la possibilità di osservare un residuo così estremo sotto l’ipotesi nulla che tutti i dati seguano il modello senza outlier. Un valore p basso suggerisce che il residuo è significativamente diverso dagli altri.<br>
+Poiché testare ogni osservazione individualmente aumenta la probabilità di falsi positivi (identificare erroneamente un outlier), si applica la correzione di Bonferroni. Questa correzione moltiplica il p-value non aggiustato per il numero totale di osservazioni, adattando il livello di significatività per il numero di confronti effettuati.<br>
+Nei tre test proposti si rifiuta H0 quindi le osservazioni 155,1551 e 1306 sono outlier.
+
+```{r, echo=TRUE}
+# distanza di cook
+cook<-cooks.distance(m3)
+plot(cook,ylim = c(0,0.9)) 
+```
+
+```{r, echo=TRUE}
+max(cook)
+```
+
+```{r, echo=TRUE}
+# cook     ----output omesso poichè troppo lungo
+```
+
+```{r, echo=TRUE}
+unname(which.max(cook)) #indice osservazione
+```
+L'osservazione 1551 risulta un vero e proprio problema perchè sia nell'ambito dello spazio dei regressori, che nello spazio dell'output genera influenza notevole.<br>
+L'osservazione 1551 non sembra avere valori delle variabili particolarmente diverse da altre. Però, evidentemente, la combinazione di valori che assume congiuntamente è notevolmente diversa dalle altre osservazioni. È improbabile un errore nell'immissione delle cifre, quindi bisognerebbe (a) verificare il dato nella fonte primaria che ha generato il dato stesso e stimare un modello dove questa osservazione viene completamente eliminata.
+
+<br>
+
+# 6 - Previsione
+In questa sezione è presentato un esempio di previsione (con il modello m3) del peso di un neonato nel caso in cui la madre sia alla terza gravidanza, con 39 settimane di gestazione.<br>
+Come mostrato di seguito, in queste condizioni si stima un peso del neonato pari a  3271.09 (stima puntuale), ovvero un peso compreso tra 2732.11 e 3810.07 (stima intervallare).
+```{r, echo=TRUE}
+# con valori medi per le altre variabili (modifica in base alla distribuzione dei dati).
+nuovo_caso <- data.frame(
+  N.gravidanze = 3,
+  Gestazione = 39,
+  Lunghezza = mean(Lunghezza),
+  Cranio = mean(Cranio), 
+  Sesso = as.factor(1)
+)
+predizione <- predict(m3, newdata = nuovo_caso, interval = "prediction")
+print("Previsione modello 3: ")
+print(predizione)
+```
+
+I grafici di seguito raffigurano dei modelli di regressione semplice in base al sesso ed a specifiche variabili (quelle che compongono il modello m3). Ovviamente i modello m3, più preciso di modelli lineari semplici con un sono regressore (come le raffigurazioni di seguito), non è rappresentabile poichè presenta una dimensionalità maggiore di 3.
+
+```{r, echo=TRUE}
+# Grafico 1: Peso vs Numero di Gravidanze
+f1 <- ggplot(neonati, aes(x = N.gravidanze, y = Peso)) +
+  geom_point(aes(color = Sesso), alpha = 0.3) +
+  geom_smooth(aes(group = Sesso), method = "lm", formula = y ~ x, se = FALSE, color = "black", size = 1) +
+  geom_smooth(aes(color = Sesso), method = "lm", formula = y ~ x, se = FALSE, size = 0.5) +
+  labs(
+       x = "N.gravidanze",
+       y = "Peso")
+
+# Grafico 2: Peso vs Settimane di Gestazione
+f2 <- ggplot(neonati, aes(x = Gestazione, y = Peso)) +
+  geom_point(aes(color = Sesso), alpha = 0.3) +
+  geom_smooth(aes(group = Sesso), method = "lm", formula = y ~ x, se = FALSE, color = "black", size = 1) +
+  geom_smooth(aes(color = Sesso), method = "lm", formula = y ~ x, se = FALSE, size = 0.5) +
+  labs(
+       x = "Gestazione",
+       y = "Peso")
+
+# Grafico 3: Peso vs Lunghezza
+f3 <- ggplot(neonati, aes(x = Lunghezza, y = Peso)) +
+  geom_point(aes(color = Sesso), alpha = 0.3) +
+  geom_smooth(aes(group = Sesso), method = "lm", formula = y ~ x, se = FALSE, color = "black", size = 1) +
+  geom_smooth(aes(color = Sesso), method = "lm", formula = y ~ x, se = FALSE, size = 0.5) +
+  labs(
+       x = "Lunghezza",
+       y = "Peso")
+
+# Grafico 4: Peso vs Circonferenza Cranica
+f4 <- ggplot(neonati, aes(x = Cranio, y = Peso)) +
+  geom_point(aes(color = Sesso), alpha = 0.3) +
+  geom_smooth(aes(group = Sesso), method = "lm", formula = y ~ x, se = FALSE, color = "black", size = 1) +
+  geom_smooth(aes(color = Sesso), method = "lm", formula = y ~ x, se = FALSE, size = 0.5) +
+  labs(
+       x = "Cranio",
+       y = "Peso")
+
+# Disposizione dei grafici in una griglia
+grid.arrange(f1, f2, f3, f4, ncol = 2)
+```
+
+Di seguito vengono, invece rappresentate le relazioni variabile-Peso (a parità di altre condizioni) utilizzando il modello m3. Ovviamente i grafici seguenti differiscono dai precedenti poichè i coefficienti (effetti marginali delle singole variabili) sono stimati col modello di regressione multipla (le figure sopra erano stimati con modelli di regressione semplice come i modelli m0.1-m0.10).
+
+```{r, echo=TRUE}
+# Caricamento del pacchetto ggeffects
+library(ggeffects)
+```
+
+```{r, echo=TRUE}
+# Ottenere le previsioni marginali con interazione tra la variabile di interesse e Sesso
+effetti_ngravidanze <- ggpredict(m3, terms = c("N.gravidanze", "Sesso"))
+effetti_gestazione  <- ggpredict(m3, terms = c("Gestazione", "Sesso"))
+effetti_cranio      <- ggpredict(m3, terms = c("Cranio", "Sesso"))
+effetti_lunghezza   <- ggpredict(m3, terms = c("Lunghezza", "Sesso"))
+
+# Visualizzare le previsioni con le osservazioni originali
+b1 <- plot(effetti_ngravidanze, show_data = TRUE)+ labs(title = NULL)
+b2 <- plot(effetti_gestazione,  show_data = TRUE)+ labs(title = NULL)
+b3 <- plot(effetti_lunghezza,   show_data = TRUE)+ labs(title = NULL)
+b4 <- plot(effetti_cranio,      show_data = TRUE)+ labs(title = NULL)
+
+# Disposizione dei grafici in una griglia
+grid.arrange(b1, b2, b3, b4, ncol = 2)
+```
+
+

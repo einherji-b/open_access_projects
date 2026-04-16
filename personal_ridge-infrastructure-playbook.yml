@@ -1,0 +1,61 @@
+---
+- name: "ridge — Infrastructure Deploy"
+  hosts: ridge
+  become: yes
+  gather_facts: yes
+
+  pre_tasks:
+    - name: Verifica Ubuntu 24.04
+      assert:
+        that:
+          - ansible_facts['distribution'] == "Ubuntu"
+          - ansible_facts['distribution_major_version'] == "24"
+        fail_msg: "Richiesto Ubuntu 24.04. Rilevato: {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}"
+
+########################################################################
+########################  CENSORED #####################################
+########################################################################
+
+  roles:
+    - role: system
+      tags: [system]
+    - role: users
+      tags: [users]
+    - role: filesystem
+      tags: [filesystem]
+    - role: network
+      tags: [network]
+    - role: nvidia
+      tags: [nvidia]
+    - role: docker
+      tags: [docker]
+    - role: traefik
+      tags: [traefik]
+    - role: minio          
+      tags: [minio]
+    - role: mlflow
+      tags: [mlflow]
+    - role: grafana
+      tags: [grafana]
+    - role: prometheus
+      tags: [prometheus]
+    - role: fastapi
+      tags: [fastapi]
+    - role: gitea        
+      tags: [gitea]
+    - role: vscode    
+      tags: [vscode]
+    - role: security
+      tags: [security]
+    - role: mediawiki
+      tags: [mediawiki]
+    - role: openproject
+      tags: [openproject]
+    - role: homer
+      tags: [homer]
+    - role: memos
+      tags: [memos]
+    - role: mattermost
+      tags: [mattermost]
+    - role: gitea_runner
+      tags: [gitea_runner]

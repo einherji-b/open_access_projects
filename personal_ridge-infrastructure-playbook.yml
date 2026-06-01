@@ -11,7 +11,7 @@
           - ansible_facts['distribution'] == "Ubuntu"
           - ansible_facts['distribution_major_version'] == "24"
         fail_msg: "Richiesto Ubuntu 24.04. Rilevato: {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}"
-
+        
 ########################################################################
 ########################  CENSORED #####################################
 ########################################################################
@@ -59,3 +59,9 @@
       tags: [mattermost]
     - role: gitea_runner
       tags: [gitea_runner]
+    - role: coolify
+      tags: [coolify]
+    - role: backup
+      tags: [backup]
+    - role: cloudflared
+      tags: [cloudflared]

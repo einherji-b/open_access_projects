@@ -1,0 +1,483 @@
+PROGETTO: ANALISI CARTELLE CLINICHE (DATABASE MONGODB)
+Il progetto implementa un sistema completo di gestione delle cartelle cliniche su MongoDB
+
+ISTRUZIONI PER IL LETTORE
+- Aprire il terminale e avviare la shell MongoDB mongosh
+- Eseguire lo script di creazione del database load("1_crea_database.js")
+- Eseguire lo script di inserimento dei dati di prova load("2_inserisci_dati.js")
+- Eseguire lo script di analisi dei tempi di ricovero load("3_analisi_tempi.js")
+- Eseguire le query di verifica aggiuntive load("4_query_verifica.js")
+In alternativa, copiare i blocchi di codice direttamente nella shell MongoDB dopo aver selezionato il database con use cartelle_cliniche
+
+
+
+
+
+
+PARTE 1 _ CREAZIONE DATABASE E COLLEZIONE
+Script: 1_crea_database.js
+Descrizione: Crea il database cartelle_cliniche e la collezione pazienti con validazione dello schema dei documenti
+------------------------------------------------------------------------------------------------------------------------
+
+//seleziona/crea il database cartelle_cliniche
+use cartelle_cliniche;
+
+//crea la collezione pazienti con validazione json schema
+db.createCollection("pazienti", {
+  validator: {
+    $jsonSchema: {
+      bsonType: "object",
+      required: ["nome", "ricoveri"],
+      properties: {
+        nome: {
+          bsonType: "string",
+          description: "Nome completo del paziente - obbligatorio"
+        },
+        ricoveri: {
+          bsonType: "array",
+          description: "Lista dei ricoveri del paziente - obbligatorio",
+          items: {
+            bsonType: "object",
+            required: ["data", "diagnosi", "anamnesi", "prognosi", "data_dimissione"],
+            properties: {
+              data: {
+                bsonType: "date",
+                description: "Data di ricovero (ISODate) - obbligatorio"
+              },
+              diagnosi: {
+                bsonType: "string",
+                description: "Diagnosi medica - obbligatorio"
+              },
+              anamnesi: {
+                bsonType: "string",
+                description: "Anamnesi del paziente - obbligatorio"
+              },
+              prognosi: {
+                bsonType: "string",
+                description: "Prognosi medica - obbligatorio"
+              },
+              data_dimissione: {
+                bsonType: "date",
+                description: "Data di dimissione (ISODate) - obbligatorio"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  validationLevel: "moderate",
+  validationAction: "warn"
+});
+
+//crea un indice sul campo nome per velocizzare le ricerche per paziente
+db.pazienti.createIndex({ nome: 1 });
+
+print(">>>>> database cartelle_cliniche e collezione pazienti creati");
+
+
+
+
+
+
+PARTE 2 _ INSERIMENTO DEI DATI DI PROVA
+Script: 2_inserisci_dati.js
+Descrizione: Inserisce 5 pazienti, ognuno con almeno 2 ricoveri completi
+-------------------------------------------------------------------------
+
+use cartelle_cliniche;
+
+//cancella eventuali dati precedenti per evitare duplicati in test ripetuti
+db.pazienti.deleteMany({});
+
+db.pazienti.insertMany([
+
+  //paziente 1
+  {
+    nome: "Mario Rossi",
+    ricoveri: [
+      {
+        data: ISODate("2024-01-10T08:00:00Z"),
+        diagnosi: "Polmonite batterica",
+        anamnesi: "Paziente di 58 anni, fumatore, riferisce febbre alta (39.5°C), "
+                + "tosse produttiva e difficoltà respiratoria da 4 giorni. "
+                + "Precedente storia di bronchite cronica.",
+        prognosi: "Favorevole con terapia antibiotica mirata. "
+                + "Si prevede risoluzione completa entro 10-14 giorni.",
+        data_dimissione: ISODate("2024-01-20T10:00:00Z") //10 giorni
+      },
+      {
+        data: ISODate("2024-06-05T09:30:00Z"),
+        diagnosi: "Infarto miocardico acuto (NSTEMI)",
+        anamnesi: "Paziente ricoverato in urgenza per dolore toracico irradiato "
+                + "al braccio sinistro. ECG mostra alterazioni del tratto ST. "
+                + "Iperteso in terapia con ACE-inibitore.",
+        prognosi: "Riservata. Necessaria coronarografia e valutazione per stent. "
+                + "Follow-up cardiologico a lungo termine indispensabile.",
+        data_dimissione: ISODate("2024-06-19T11:00:00Z") //14 giorni
+      }
+    ]
+  },
+
+  //paziente 2
+  {
+    nome: "Giulia Bianchi",
+    ricoveri: [
+      {
+        data: ISODate("2024-02-14T07:00:00Z"),
+        diagnosi: "Appendicite acuta",
+        anamnesi: "Paziente di 28 anni, in buona salute generale, si presenta al "
+                + "pronto soccorso con dolore addominale in fossa iliaca destra, "
+                + "nausea e febbre a 38°C. Segno di McBurney positivo.",
+        prognosi: "Ottima dopo intervento di appendicectomia laparoscopica. "
+                + "Decorso post-operatorio regolare atteso.",
+        data_dimissione: ISODate("2024-02-18T15:00:00Z") //4 giorni
+      },
+      {
+        data: ISODate("2024-09-22T11:00:00Z"),
+        diagnosi: "Frattura del radio distale (frattura di Colles)",
+        anamnesi: "Caduta accidentale con mano in estensione. Dolore acuto al "
+                + "polso destro, deformità evidente. Rx conferma frattura "
+                + "extra-articolare composta.",
+        prognosi: "Buona con riduzione e immobilizzazione gessata per 6 settimane. "
+                + "Fisioterapia raccomandata al termine dell'immobilizzazione.",
+        data_dimissione: ISODate("2024-09-29T14:00:00Z") //7 giorni
+      },
+      {
+        data: ISODate("2024-12-01T08:00:00Z"),
+        diagnosi: "Pielonefrite acuta",
+        anamnesi: "Febbre elevata (39.8°C), brividi, dolore lombare bilaterale e "
+                + "disuria. Urinocoltura positiva per E. coli. Ecografia renale "
+                + "nella norma.",
+        prognosi: "Favorevole con terapia antibiotica endovenosa seguita da "
+                + "terapia orale domiciliare. Controllo urinocoltura post-terapia.",
+        data_dimissione: ISODate("2024-12-06T09:00:00Z") //5 giorni
+      }
+    ]
+  },
+
+  //paziente 3
+  {
+    nome: "Antonio Verdi",
+    ricoveri: [
+      {
+        data: ISODate("2024-03-01T06:00:00Z"),
+        diagnosi: "Ictus ischemico transitorio (TIA)",
+        anamnesi: "Paziente di 72 anni, iperteso e diabetico tipo 2. Episodio "
+                + "di emiparesi destra transitoria della durata di circa 45 minuti "
+                + "con successiva risoluzione completa. TC cranio nella norma.",
+        prognosi: "Riservata con alto rischio di ictus nei 90 giorni successivi. "
+                + "Avviata doppia antiaggregazione e ottimizzazione terapia "
+                + "antiipertensiva. Monitoraggio neurologico stretto.",
+        data_dimissione: ISODate("2024-03-10T12:00:00Z") //9 giorni
+      },
+      {
+        data: ISODate("2024-07-18T14:00:00Z"),
+        diagnosi: "Scompenso cardiaco congestizio",
+        anamnesi: "Progressivo peggioramento della dispnea da sforzo nelle ultime "
+                + "2 settimane, ortopnea, edemi declivi bilaterali. Rx torace "
+                + "mostra cardiomegalia e congestione polmonare.",
+        prognosi: "Condizionata alla risposta alla terapia diuretica e alla "
+                + "gestione ottimale dei fattori precipitanti. Educazione del "
+                + "paziente al monitoraggio del peso corporeo quotidiano.",
+        data_dimissione: ISODate("2024-07-30T10:00:00Z") //12 giorni
+      }
+    ]
+  },
+
+  //paziente 4
+  {
+    nome: "Francesca Marino",
+    ricoveri: [
+      {
+        data: ISODate("2024-04-10T10:00:00Z"),
+        diagnosi: "Diabete mellito tipo 1 - chetoacidosi diabetica",
+        anamnesi: "Paziente di 22 anni, diabetica tipo 1 in insulinoterapia. "
+                + "Accesso in PS per nausea, vomito, dolori addominali e stato "
+                + "confusionale. Glicemia 520 mg/dL, pH 7.10, chetonemia elevata.",
+        prognosi: "Buona con terapia intensiva di reidratazione e insulina e.v. "
+                + "Necessaria educazione terapeutica per prevenire recidive.",
+        data_dimissione: ISODate("2024-04-15T16:00:00Z") //5 giorni
+      },
+      {
+        data: ISODate("2024-10-05T08:30:00Z"),
+        diagnosi: "Retinite diabetica proliferante - laser fotocoagulazione",
+        anamnesi: "Controllo oftalmologico programmato evidenzia retinopatia "
+                + "diabetica proliferante bilaterale con rischio di distacco "
+                + "retinico. Paziente asintomatica ma con visus ridotto.",
+        prognosi: "Discreta. La fotocoagulazione panretinica mira a stabilizzare "
+                + "la progressione. Follow-up oftalmologico ogni 3 mesi.",
+        data_dimissione: ISODate("2024-10-08T14:00:00Z") //3 giorni
+      }
+    ]
+  },
+
+  //paziente 5
+  {
+    nome: "Roberto Ferrari",
+    ricoveri: [
+      {
+        data: ISODate("2024-05-20T09:00:00Z"),
+        diagnosi: "Colecistite acuta calcolosa",
+        anamnesi: "Paziente di 45 anni, obeso (BMI 33). Dolore colico in ipocondrio "
+                + "destro post-prandiale, febbre 38.5°C. Ecografia addominale: "
+                + "colecisti distesa con calcoli e pareti ispessite.",
+        prognosi: "Buona dopo colecistectomia laparoscopica in elezione. "
+                + "Si consiglia dieta ipocalorica e controllo del peso.",
+        data_dimissione: ISODate("2024-05-26T11:00:00Z") //6 giorni
+      },
+      {
+        data: ISODate("2024-11-12T07:00:00Z"),
+        diagnosi: "Ernia inguinale destra incarcerata",
+        anamnesi: "Paziente con storia di ernia inguinale nota da 2 anni, non "
+                + "operata. Accesso in urgenza per dolore acuto inguinale e "
+                + "tumefazione non riducibile. Non segni di strangolamento.",
+        prognosi: "Buona dopo intervento chirurgico urgente di erniorrafia con "
+                + "posizionamento di mesh. Decorso post-operatorio nella norma.",
+        data_dimissione: ISODate("2024-11-17T13:00:00Z") //5 giorni
+      },
+      {
+        data: ISODate("2024-12-28T15:00:00Z"),
+        diagnosi: "Polmonite ab ingestis",
+        anamnesi: "Paziente portato in PS da familiari per febbre, tosse e "
+                + "dispnea insorte dopo episodio di vomito. Rx torace mostra "
+                + "infiltrato al lobo inferiore destro. SpO2 91% in aria ambiente.",
+        prognosi: "Favorevole con terapia antibiotica ad ampio spettro e.v. "
+                + "e supporto ossigenoterapia. Attesa dimissione in 8-10 giorni.",
+        data_dimissione: ISODate("2025-01-07T10:00:00Z") //10 giorni
+      }
+    ]
+  }
+
+]);
+
+print(">>>>> 5 pazienti inseriti nella collezione pazienti");
+print("> riepilogo ricoveri inseriti:");
+print("  - Mario Rossi: 2 ricoveri");
+print("  - Giulia Bianchi: 3 ricoveri");
+print("  - Antonio Verdi: 2 ricoveri");
+print("  - Francesca Marino: 2 ricoveri");
+print("  - Roberto Ferrari: 3 ricoveri");
+print("> Totale ricoveri: 12");
+
+
+
+
+
+PARTE 3 _ ANALISI DEI TEMPI DI RICOVERO
+Script: 3_analisi_tempi.js
+Descrizione: Calcola il tempo medio di ricovero in giorni per ciascun paziente e la media globale su tutti i ricoveri. I risultati vengono mostrati in console
+-------------------------------------------------------------------------------------------------------------------------------------------------
+use cartelle_cliniche;
+
+//pipeline di aggregazione
+//$unwind srotola l'array ricoveri (un documento per ogni ricovero)
+//$project calcola la durata in giorni per ogni singolo ricovero
+//$group raggruppa per paziente e calcola la media individuale
+//$group calcola la media globale su tutti i pazienti
+//$project formatta i valori decimali a 2 cifre
+
+var pipeline = [
+
+  //espansione array ricoveri
+  {
+    $unwind: "$ricoveri"
+  },
+
+  //calcolo durata di ogni singolo ricovero in giorni
+  {
+    $project: {
+      nome: 1,
+      durata_giorni: {
+        $divide: [
+          { $subtract: ["$ricoveri.data_dimissione", "$ricoveri.data"] },
+          1000 * 60 * 60 * 24 //millisecondi in un giorno
+        ]
+      }
+    }
+  },
+
+  //raggruppamento per paziente e calcolo media individuale
+  {
+    $group: {
+      _id: "$nome",
+      media_giorni_paziente: { $avg: "$durata_giorni" },
+      totale_ricoveri: { $sum: 1 },
+      totale_giorni: { $sum: "$durata_giorni" }
+    }
+  },
+
+  //calcolo media globale su tutti i pazienti
+  {
+    $group: {
+      _id: null,
+      media_globale_giorni: { $avg: "$media_giorni_paziente" },
+      pazienti: {
+        $push: {
+          nome: "$_id",
+          media_giorni: "$media_giorni_paziente",
+          totale_ricoveri: "$totale_ricoveri",
+          totale_giorni: "$totale_giorni"
+        }
+      }
+    }
+  },
+
+  //formattazione valori decimali
+  {
+    $project: {
+      _id: 0,
+      media_globale_giorni: { $round: ["$media_globale_giorni", 2] },
+      pazienti: {
+        $map: {
+          input: "$pazienti",
+          as: "p",
+          in: {
+            nome: "$$p.nome",
+            media_giorni: { $round: ["$$p.media_giorni", 2] },
+            totale_ricoveri: "$$p.totale_ricoveri",
+            totale_giorni: { $round: ["$$p.totale_giorni", 2] }
+          }
+        }
+      }
+    }
+  }
+
+];
+
+
+
+//esecuzione e stampa risultati
+
+var risultato = db.pazienti.aggregate(pipeline).toArray();
+
+if (risultato.length === 0) {
+  print("Nessun dato trovato. Assicurarsi di aver eseguito prima lo script 2");
+} else {
+
+  var report = risultato[0];
+
+  print("REPORT TEMPI MEDI DI RICOVERO");
+
+  //ordinamento pazienti per nome
+  report.pazienti.sort(function(a, b) {
+    return a.nome.localeCompare(b.nome);
+  });
+
+  //stampa dati per ogni paziente
+  report.pazienti.forEach(function(p) {
+    print("  Paziente: " + p.nome);
+    print("  Ricoveri totali: " + p.totale_ricoveri);
+    print("  Giorni totali: " + p.totale_giorni + " gg");
+    print("  Media ricovero: " + p.media_giorni + " gg");
+    print("  ────────────────────────────────────────────────────────");
+  });
+
+  print("");
+  print("MEDIA GLOBALE DI RICOVERO (tutti i pazienti): "
+        + report.media_globale_giorni + " giorni ***");
+}
+
+
+
+
+
+
+
+PARTE 4 _ QUERY DI SUPPORTO E VERIFICA
+Script: 4_query_verifica.js
+Descrizione: è uno script aggiuntivo con query utili per verificare i dati inseriti e ottenere ulteriori insight
+------------------------------------------------------------------------------------------------------------------
+
+use cartelle_cliniche;
+
+//query 1__elenco di tutti i pazienti con numero di ricoveri
+print("Pazienti e numero di ricoveri");
+db.pazienti.aggregate([
+  {
+    $project: {
+      _id: 0,
+      nome: 1,
+      numero_ricoveri: { $size: "$ricoveri" }
+    }
+  },
+  { $sort: { nome: 1 } }
+]).forEach(function(doc) {
+  print(" " + doc.nome + " --> " + doc.numero_ricoveri + " ricovero/i");
+});
+
+print("");
+
+//query 2__ricovero più lungo in assoluto
+print("Ricovero più lungo");
+db.pazienti.aggregate([
+  { $unwind: "$ricoveri" },
+  {
+    $project: {
+      _id: 0,
+      nome: 1,
+      diagnosi: "$ricoveri.diagnosi",
+      data_ricovero:"$ricoveri.data",
+      data_dimissione: "$ricoveri.data_dimissione",
+      durata_giorni: {
+        $round: [{
+          $divide: [
+            { $subtract: ["$ricoveri.data_dimissione", "$ricoveri.data"] },
+            86400000
+          ]
+        }, 0]
+      }
+    }
+  },
+  { $sort: { durata_giorni: -1 } },
+  { $limit: 1 }
+]).forEach(function(doc) {
+  print("Paziente: " + doc.nome);
+  print("Diagnosi: " + doc.diagnosi);
+  print("Durata: " + doc.durata_giorni + " giorni");
+});
+
+print("");
+
+//query 3__ricovero più breve in assoluto
+print("Ricovero più breve");
+db.pazienti.aggregate([
+  { $unwind: "$ricoveri" },
+  {
+    $project: {
+      _id: 0,
+      nome: 1,
+      diagnosi: "$ricoveri.diagnosi",
+      durata_giorni: {
+        $round: [{
+          $divide: [
+            { $subtract: ["$ricoveri.data_dimissione", "$ricoveri.data"] },
+            86400000
+          ]
+        }, 0]
+      }
+    }
+  },
+  { $sort: { durata_giorni: 1 } },
+  { $limit: 1 }
+]).forEach(function(doc) {
+  print("Paziente: " + doc.nome);
+  print("Diagnosi: " + doc.diagnosi);
+  print("Durata: " + doc.durata_giorni + " giorni");
+});
+
+print("");
+
+//uery 4_numero totale ricoveri nel database
+print("Statistiche generali");
+var totaleRicoveri = db.pazienti.aggregate([
+  { $project: { n: { $size: "$ricoveri" } } },
+  { $group: { _id: null, totale: { $sum: "$n" } } }
+]).toArray()[0].totale;
+
+var totalePazienti = db.pazienti.countDocuments();
+
+print("Pazienti nel database: " + totalePazienti);
+print("Ricoveri totali: " + totaleRicoveri);
+print("Media ricoveri/paziente: " +
+      (totaleRicoveri / totalePazienti).toFixed(2));
